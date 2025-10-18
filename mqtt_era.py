@@ -133,7 +133,7 @@ class MQTT:
         # 2. Khởi tạo client MQTT
         self.client = MQTTClient(client_id, server, port, user=username, password=password, keepalive=60)
 
-        # 3. Đăng ký "di chúc" với client bằng phương thức set_last_will()
+        # 3. Đăng ký "di chúc" với client bằng phương thức set_last_will() , 
         #    Việc này phải được thực hiện SAU KHI tạo client và TRƯỚC KHI kết nối.
         self.client.set_last_will(
             online_topic,
@@ -142,10 +142,6 @@ class MQTT:
             qos=1
         )
         
-        try:
-            self.client.disconnect()
-        except:
-            pass
         self.client.connect()
         self.client.set_callback(self.__on_receive_message)
         say('Connected to MQTT broker')
@@ -276,7 +272,6 @@ class MQTT:
         
         # Handle different value types
         if isinstance(value, bool):
-            # True → 1, False → 0
             payload = f'{{"v": {1 if value else 0}}}'
         elif isinstance(value, str):
             # String cần quotes
@@ -287,13 +282,11 @@ class MQTT:
         
         # Publish với throttle nhẹ
         try:
-            # Throttle 10ms (thay vì 100ms)
             now = time.ticks_ms()
             elapsed = time.ticks_diff(now, self.last_sent)
             if elapsed < 10:
                 time.sleep_ms(10 - elapsed)
             
-            # Publish (qos=0 mặc định cho speed)
             self.client.publish(topic, payload.encode('utf-8'), retain=True, qos=0)
             self.last_sent = time.ticks_ms()
             
@@ -389,6 +382,7 @@ class MQTT:
         return self.get_virtual_pin_simple_value(pin)
 
 mqtt = MQTT()
+
 
 
 
