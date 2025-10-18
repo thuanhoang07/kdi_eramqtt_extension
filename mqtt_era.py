@@ -20,11 +20,12 @@ class MQTT:
         self.virtual_pins = {}
         self.virtual_pin_values = {}
         self.subscribed_pins = set()
+        self._topic_cache = {}
 
     def __on_receive_message(self, topic: bytes, msg: bytes) -> None:
-        topic_str = topic.decode('ascii')
-        payload   = msg.decode('ascii')
-        print(f"[MQTT] Received message → topic='{topic_str}', payload='{payload}'")
+        topic_str = topic.decode('utf-8')
+        payload   = msg.decode('utf-8')
+        # print(f"[MQTT] Received message → topic='{topic_str}', payload='{payload}'")
         try:
             data = ujson.loads(payload)
         except Exception as e:
@@ -121,7 +122,26 @@ class MQTT:
                     + str(time.ticks_ms())
 
         # 1) Create client and connect
-        self.client = MQTTClient(client_id, server, port, username, password)
+        # self.client = MQTTClient(client_id, server, port, username, password)
+        
+            # --- BẮT ĐẦU LOGIC LAST WILL AND TESTAMENT (LWT) ---
+
+        # 1. Chuẩn bị nội dung cho "di chúc" (Last Will)
+        online_topic = f"eoh/chip/{username}/is_online"
+        online_payload_offline = f'{{"ol":0}}'
+        
+        # 2. Khởi tạo client MQTT
+        self.client = MQTTClient(client_id, server, port, user=username, password=password, keepalive=60)
+
+        # 3. Đăng ký "di chúc" với client bằng phương thức set_last_will()
+        #    Việc này phải được thực hiện SAU KHI tạo client và TRƯỚC KHI kết nối.
+        self.client.set_last_will(
+            online_topic,
+            online_payload_offline,
+            retain=True,
+            qos=1
+        )
+        
         try:
             self.client.disconnect()
         except:
@@ -130,6 +150,11 @@ class MQTT:
         self.client.set_callback(self.__on_receive_message)
         say('Connected to MQTT broker')
         
+        # online_topic = f"eoh/chip/{username}/is_online"
+        # online_payload = f'{{"ol":0}}'
+        # self.client.publish(online_topic, online_payload, retain=True, qos=1)
+        # time.sleep_ms(500)
+        
         self.subscribed_pins.clear()
 
         
@@ -137,29 +162,29 @@ class MQTT:
         down_topic = f"eoh/chip/{username}/down"
         self.callbacks[down_topic] = self._handle_config_down  # Register callback
         self.client.subscribe(down_topic)  # Subscribe
-        say(f"Subscribed to {down_topic}")
+        # say(f"Subscribed to {down_topic}")
 
         # 3) Wait to ensure subscription is complete
         time.sleep_ms(500)
 
         # 4) Send online with ask_configuration
         online_topic = f"eoh/chip/{username}/is_online"
-        online_payload = f'{{"ol":1,"wifi_ssid":"{self.wifi_ssid}","ask_configuration":1}}'
+        online_payload = f'{{"ol":1,"ask_configuration":1}}'
         self.client.publish(online_topic, online_payload, retain=True, qos=1)
-        say(f'Announced online with config request')
+        # say(f'Announced online with config request')
 
         # 5) Wait for and process config message
-        say('Waiting for configuration...')
+        # say('Waiting for configuration...')
         timeout = 0
         while len(self.virtual_pins) == 0 and timeout < 50:  # Wait max 5 seconds
             self.client.check_msg()  # Check for incoming messages
             time.sleep_ms(100)
             timeout += 1
         
-        if len(self.virtual_pins) > 0:
-            say(f'Configuration received: {len(self.virtual_pins)} pins configured')
-        else:
-            say('Warning: No configuration received')
+        # if len(self.virtual_pins) > 0:
+        #     say(f'Configuration received: {len(self.virtual_pins)} pins configured')
+        # else:
+        #     say('Warning: No configuration received')
 
 
     def subscribe_config_down(self, token: str, callback=None) -> None:
@@ -182,14 +207,15 @@ class MQTT:
                       .get('devices', [])
                       
         
-        self.virtual_pins.clear()              
+        self.virtual_pins.clear()      
+        self._topic_cache.clear()        
                       
         for d in devices:
             for v in d.get('virtual_pins', []):
                 pin    = int(v['pin_number'])
                 cfg_id = int(v['config_id'])
                 self.virtual_pins[pin] = cfg_id
-        print("Config received, pin→config_id:", self.virtual_pins)
+        # print("Config received, pin→config_id:", self.virtual_pins)
 
     def on_receive_message(self, topic: str, callback) -> None:
         """
@@ -198,7 +224,7 @@ class MQTT:
         full_topic = topic
         self.callbacks[full_topic] = callback
         self.client.subscribe(full_topic)
-        say(f"Subscribed to {full_topic}")
+        # say(f"Subscribed to {full_topic}")
 
     def resubscribe(self) -> None:
         """
@@ -208,7 +234,7 @@ class MQTT:
             self.client.subscribe(t)
 
     def virtual_write(self, pin: int, value, username: str = '', 
-                      qos: int = 0, debug: bool = True) -> bool:
+                      qos: int = 0, debug: bool = False) -> bool:
         """
         Publish a value to a virtual pin (optimized for Blockly).
         
@@ -237,7 +263,16 @@ class MQTT:
         
         cfg_id = self.virtual_pins[pin]
         token = username or self.username
-        topic = f"eoh/chip/{token}/config/{cfg_id}/value"
+        # topic = f"eoh/chip/{token}/config/{cfg_id}/value"
+        
+        if pin not in self._topic_cache:
+            # Nếu topic cho pin này chưa có trong cache, tạo mới và lưu lại
+            cfg_id = self.virtual_pins[pin]
+            token = username or self.username
+            self._topic_cache[pin] = f"eoh/chip/{token}/config/{cfg_id}/value"
+        
+        # Luôn lấy topic từ cache để tái sử dụng
+        topic = self._topic_cache[pin]
         
         # Handle different value types
         if isinstance(value, bool):
@@ -259,7 +294,7 @@ class MQTT:
                 time.sleep_ms(10 - elapsed)
             
             # Publish (qos=0 mặc định cho speed)
-            self.client.publish(topic, payload, retain=True, qos=0)
+            self.client.publish(topic, payload.encode('utf-8'), retain=True, qos=0)
             self.last_sent = time.ticks_ms()
             
             if debug:
@@ -287,7 +322,7 @@ class MQTT:
             cb = callback
             
         self.on_receive_message(topic, cb)
-        say(f"Subscribed to virtual pin V{pin}")
+        # say(f"Subscribed to virtual pin V{pin}")
         self.subscribed_pins.add(pin)
 
 
@@ -301,7 +336,7 @@ class MQTT:
             data = ujson.loads(msg)
             value = data.get('value', 'Unknown')
             trigger_id = data.get('trigger_id', None)
-            print(f"[Virtual Pin V{pin}] Received value: {value}, trigger_id: {trigger_id}")
+            # print(f"[Virtual Pin V{pin}] Received value: {value}, trigger_id: {trigger_id}")
             
             # Lưu giá trị vào dict nếu có pin number
             if pin is not None:
@@ -354,6 +389,8 @@ class MQTT:
         return self.get_virtual_pin_simple_value(pin)
 
 mqtt = MQTT()
+
+
 
 
 
