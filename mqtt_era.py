@@ -66,6 +66,7 @@ class MQTT:
 
             ip = self.station.ifconfig()[0]
             say(f'WiFi connected. IP: {ip}')
+            time.sleep_ms(5000)
 
     def wifi_connected(self) -> bool:
         return self.station.isconnected()
@@ -121,11 +122,6 @@ class MQTT:
         client_id = ubinascii.hexlify(machine.unique_id()).decode() \
                     + str(time.ticks_ms())
 
-        # 1) Create client and connect
-        # self.client = MQTTClient(client_id, server, port, username, password)
-        
-            # --- BẮT ĐẦU LOGIC LAST WILL AND TESTAMENT (LWT) ---
-
         # 1. Chuẩn bị nội dung cho "di chúc" (Last Will)
         online_topic = f"eoh/chip/{username}/is_online"
         online_payload_offline = f'{{"ol":0}}'
@@ -134,7 +130,6 @@ class MQTT:
         self.client = MQTTClient(client_id, server, port, user=username, password=password, keepalive=60)
 
         # 3. Đăng ký "di chúc" với client bằng phương thức set_last_will() , 
-        #    Việc này phải được thực hiện SAU KHI tạo client và TRƯỚC KHI kết nối.
         self.client.set_last_will(
             online_topic,
             online_payload_offline,
@@ -145,22 +140,15 @@ class MQTT:
         self.client.connect()
         self.client.set_callback(self.__on_receive_message)
         say('Connected to MQTT broker')
-        
-        # online_topic = f"eoh/chip/{username}/is_online"
-        # online_payload = f'{{"ol":0}}'
-        # self.client.publish(online_topic, online_payload, retain=True, qos=1)
-        # time.sleep_ms(500)
+        time.sleep_ms(5000)
         
         self.subscribed_pins.clear()
 
-        
         # 2) Subscribe topic down with handler
         down_topic = f"eoh/chip/{username}/down"
         self.callbacks[down_topic] = self._handle_config_down  # Register callback
         self.client.subscribe(down_topic)  # Subscribe
         # say(f"Subscribed to {down_topic}")
-
-        # 3) Wait to ensure subscription is complete
         time.sleep_ms(500)
 
         # 4) Send online with ask_configuration
@@ -168,9 +156,9 @@ class MQTT:
         online_payload = f'{{"ol":1,"ask_configuration":1}}'
         self.client.publish(online_topic, online_payload, retain=True, qos=1)
         # say(f'Announced online with config request')
+        time.sleep_ms(500)
 
         # 5) Wait for and process config message
-        # say('Waiting for configuration...')
         timeout = 0
         while len(self.virtual_pins) == 0 and timeout < 50:  # Wait max 5 seconds
             self.client.check_msg()  # Check for incoming messages
@@ -382,6 +370,16 @@ class MQTT:
         return self.get_virtual_pin_simple_value(pin)
 
 mqtt = MQTT()
+
+
+
+
+
+
+
+
+
+
 
 
 
